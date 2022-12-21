@@ -1,0 +1,442 @@
+---
+title: "index"
+output: html_document
+date: "2022-12-15"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+library(widyr)
+library(tidytext)
+library(ggplot2)
+library(stringr)
+library(RColorBrewer)
+library(scales)
+library(ggeasy)
+library(patchwork)
+library(ggraph)
+library(igraph)
+library(tidygraph)
+library(dplyr)
+library(netUtils)
+library(tidyr)
+library(gdata)
+library(hcandersenr)
+library(xlsx)
+library(readxl)
+library(SnowballC)
+library(udpipe)
+library(writexl)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r read and generate full data}
+read_xlsx("511_discussions.xlsx") -> Data
+filter(Data, `Forum Name` == "COURSE QUESTIONS") -> Omit.1
+filter(Data, `Forum Name` == 'GETTING TO KNOW EACH OTHER') -> Omit.2
+filter(Data, `Forum Name` == 'TECHNICAL QUESTIONS') -> Omit.3
+rbind(Omit.1, Omit.2, Omit.3) -> Omit
+anti_join(Data, Omit) -> Data
+rm(Omit, Omit.1,Omit.2,Omit.3)
+select(Data, 2:11) -> Data
+Data[is.na(Data$`Parent Post`),] -> Initials
+filter(Initials, `Course Name` == 'MTED-511-900 - SP 13-14') -> C13_Initials 
+colnames(C13_Initials)[8] <- "AuthorTo"
+colnames(C13_Initials)[10] <- "AuthorFrom"
+C13_Initials[c(1,7,3,5,6,10,8,2,9)] -> C13_Initials
+
+select(Data, 2,10) -> messageID #MessageID, AuthorFrom
+na.omit(Data) -> Data #Removes initial
+#select(DBdata_2, 2:4,7) -> DBdata_3 #Forum Name, Parent Post/InReplyTo, ThreadID, AuthorFrom
+select(Data, -2) -> Data
+colnames(Data)[7] <- c("MessageID") #change InReplyTo to message ID
+colnames(Data)[9] <- c("AuthorFrom") 
+inner_join(messageID, Data, by = "MessageID") -> Data
+colnames(Data)[2] <- c("AuthorTo")
+Data[c(3,8,4,6,7,10,2,1,9)] -> Data
+filter(Data, `Course Name` == 'MTED-511-900 - SP 13-14') -> C13_edges
+rbind(C13_edges,C13_Initials) -> C13_full
+```
+
+```{r add CP data}
+C13_edges.1 <- select(C13_edges, 6,7) 
+gr13        <- graph_from_data_frame(C13_edges.1, directed = TRUE)
+read_csv("511_CP_data.csv") -> CPdata
+select(CPdata, 1,6) -> CPdata.13
+  inner_join(C13_full, CPdata.13, by = "AuthorFrom") -> C13_full
+  C13_full$Section <- 1:nrow(C13_full)
+  select(C13_full, 1,2,5,6,10,11) -> C13_full #adjust this line if more data is needed (e.g., forum, time, etc.)
+  colnames(C13_full)[5] <- c("CP") 
+```
+
+```{r prep cumulative datasets}
+select(C13_full, 6,2,3) -> C13_full.1
+colnames(C13_full.1)[1] <- "doc_id"
+colnames(C13_full.1)[3] <- "text"
+filter(C13_full.1, `Forum Name` == "Week 1 Discussion Board (DB)") -> C13_wk1
+filter(C13_full.1, `Forum Name` == "Week 2 DB") -> C13_wk2
+filter(C13_full.1, `Forum Name` == "Follow-Up Discussion (Wk3) - Covariation and Graphing") -> C13_wk3
+filter(C13_full.1, `Forum Name` == "Week 4 DB") -> C13_wk4
+filter(C13_full.1, `Forum Name` == "Follow-Up Discussion (Wk5) - Trig") -> C13_wk5
+filter(C13_full.1, `Forum Name` == "Week 5 DB") -> C13_wk5.1
+filter(C13_full.1, `Forum Name` == "Week 6 DB") -> C13_wk6
+filter(C13_full.1, `Forum Name` == "Follow-Up Discussion (Wk7) - Functions") -> C13_wk7
+filter(C13_full.1, `Forum Name` == "Week 7 Learning Exercises DB") -> C13_wk7.1
+rbind(C13_wk1,C13_wk2,C13_wk3,C13_wk4) -> C13_wk1_4
+rbind(C13_wk1,C13_wk2,C13_wk3,C13_wk4, C13_wk5,C13_wk5.1,C13_wk6,C13_wk7,C13_wk7.1) -> C13_wk1_7
+C13_full.1 -> C13_wk1_10
+select(C13_wk1, 1,3) -> C13_wk1
+select(C13_wk1_4, 1,3) -> C13_wk1_4
+select(C13_wk1_7, 1,3) -> C13_wk1_7
+select(C13_wk1_10, 1,3) -> C13_wk1_10
+```
+
+```{r lemmatization}
+#Wk1
+udpipe(C13_wk1, object = "english") -> C13_wk1_lemmas
+filter(C13_wk1_lemmas, upos == "NOUN") -> C13_wk1_lemmas.N
+filter(C13_wk1_lemmas, upos == "VERB") -> C13_wk1_lemmas.V
+filter(C13_wk1_lemmas, upos == "ADJ") -> C13_wk1_lemmas.A
+#Wk1-4
+udpipe(C13_wk1_4, object = "english") -> C13_wk1_4_lemmas
+filter(C13_wk1_4_lemmas, upos == "NOUN") -> C13_wk1_4_lemmas.N
+filter(C13_wk1_4_lemmas, upos == "VERB") -> C13_wk1_4_lemmas.V
+filter(C13_wk1_4_lemmas, upos == "ADJ") -> C13_wk1_4_lemmas.A
+#Wk1-7
+udpipe(C13_wk1_7, object = "english") -> C13_wk1_7_lemmas
+filter(C13_wk1_7_lemmas, upos == "NOUN") -> C13_wk1_7_lemmas.N
+filter(C13_wk1_7_lemmas, upos == "VERB") -> C13_wk1_7_lemmas.V
+filter(C13_wk1_7_lemmas, upos == "ADJ") -> C13_wk1_7_lemmas.A
+#Wk1-10
+udpipe(C13_wk1_10, object = "english") -> C13_wk1_10_lemmas
+filter(C13_wk1_10_lemmas, upos == "NOUN") -> C13_wk1_10_lemmas.N
+filter(C13_wk1_10_lemmas, upos == "VERB") -> C13_wk1_10_lemmas.V
+filter(C13_wk1_10_lemmas, upos == "ADJ") -> C13_wk1_10_lemmas.A
+
+rbind(C13_wk1_lemmas.N,C13_wk1_lemmas.V,C13_wk1_lemmas.A) -> C13_wk1_lemmas.NVA
+rbind(C13_wk1_4_lemmas.N,C13_wk1_4_lemmas.V,C13_wk1_4_lemmas.A) -> C13_wk1_4_lemmas.NVA
+rbind(C13_wk1_7_lemmas.N,C13_wk1_7_lemmas.V,C13_wk1_7_lemmas.A) -> C13_wk1_7_lemmas.NVA
+rbind(C13_wk1_10_lemmas.N,C13_wk1_10_lemmas.V,C13_wk1_10_lemmas.A) -> C13_wk1_10_lemmas.NVA
+```
+
+```{r}
+digits <- tibble(word = c("n&gt", "&quot","quot","?&quot", "amp", "andrew", "sue", "amanda", "a", "b", "w:LsdException","UnhideWhenUsed","false","lock","locked","prior","priority","pt","qformat","semihidden","unhide","unhidewh","unhidewhenU","unhidewhenuse", "unhidewhenused","fa",".&quot", "&It", "it", "font","-style", "style","miso-style","-&gt","!&quot", "6?&quot", "-font", ":0",";1",";1","glink.drexel.edu","h&quot","ing","mso-style", "mso-para-margin","mso-padd","mso-hansi-theme","mso-ascii-theme"," mso-tstyle", "n&lt", "x&lt;10",	"w:lsdexception","unhidewhenu","unhidewhenuse","tracy","6?&quot", " It","lt","&lt","	
+alt:0","table.msonormaltable", ":&quot" ,"(kgdalia@gmail.com", "&gt","-latin",":12.0",".swf"))
+rep_str <- c('\\*pi' = 'pi','generalizationsa' = 'generalizations', 'input.' = 'input', 'happene'='happen','lim\\b'='limit','misunderstan'='misunderstand','ntoice' = 'notice', 'π'='pi', 'θ'='theta', 'x2'='x^2','varie\\b'='varies', 'thet\\b'='theta','\\*r'='r')
+```
+
+```{r wk1}
+select(C13_wk1_lemmas.NVA, 1,10) -> C13_wk1_lemmas.NVA.1
+colnames(C13_wk1_lemmas.NVA.1)[2] <- "word"
+C13_wk1_lemmas.NVA.1 <- C13_wk1_lemmas.NVA.1 %>% 
+    mutate(word = ifelse(str_detect(word, "^[:upper:]+$"), word,str_to_lower(word)))
+C13_wk1_lemmas.NVA.1$word <- str_replace_all(C13_wk1_lemmas.NVA.1$word, rep_str)
+C13_wk1_lemmas.NVA.1 <- C13_wk1_lemmas.NVA.1 %>%  
+  anti_join(stop_words) %>%
+  anti_join(digits)
+
+C13_wk1_cors <- C13_wk1_lemmas.NVA.1 %>% 
+  group_by(word) %>%
+  filter(n()>=10) %>%
+  pairwise_cor(word, doc_id, sort = TRUE)
+
+C13_wk1_cors.1 <- C13_wk1_cors %>%
+  filter(correlation > .25)
+select(C13_wk1_cors.1, 1) -> C13_wk1_nodes
+unique(C13_wk1_nodes)  -> C13_wk1_nodes
+
+read_xlsx("C13wk1_TermClusters_1.xlsx") -> C13wk1_TermClusters1
+C13_wk1_net <- graph_from_data_frame(C13_wk1_cors.1, directed = FALSE, C13wk1_TermClusters1) #C13_wk1_nodes
+C13_wk1_lay <- create_layout(C13_wk1_net, layout = "fr")
+g1 <- ggraph(C13_wk1_lay) +
+  geom_edge_link(aes(edge_alpha = correlation)) +
+  geom_node_point(aes(color = V(C13_wk1_net)$Description_1, size = 4*betweenness(C13_wk1_net))) + 
+  geom_node_text(aes(label = name), repel = TRUE) +
+  theme_graph()
+
+edge.betweenness.community(C13_wk1_net) -> C13_wk1_com
+C13wk1_Clusters <- tibble(term = C13_wk1_com$names, 
+                               Wk1_Cluster = C13_wk1_com$membership)
+
+read_xlsx("C13wk1_TermClusters.xlsx") -> c13_wk1_old
+left_join(C13wk1_Clusters, c13_wk1_old, by ="term") -> C13wk1_Clusters
+write_xlsx(C13wk1_Clusters, path = "C13wk1_TermClusters_1.xlsx")
+```
+
+```{r wk 1-4}
+select(C13_wk1_4_lemmas.NVA, 1,10) -> C13_wk1_4_lemmas.NVA.1
+colnames(C13_wk1_4_lemmas.NVA.1)[2] <- "word"
+C13_wk1_4_lemmas.NVA.1 <- C13_wk1_4_lemmas.NVA.1 %>% 
+    mutate(word = ifelse(str_detect(word, "^[:upper:]+$"), word,str_to_lower(word)))
+C13_wk1_4_lemmas.NVA.1$word <- str_replace_all(C13_wk1_4_lemmas.NVA.1$word, rep_str)
+C13_wk1_4_lemmas.NVA.1 <- C13_wk1_4_lemmas.NVA.1 %>%  
+  anti_join(stop_words) %>%
+  anti_join(digits)
+
+C13_wk14_cors <- C13_wk1_4_lemmas.NVA.1 %>% 
+  group_by(word) %>%
+  filter(n()>=10) %>%
+  pairwise_cor(word, doc_id, sort = TRUE)
+
+C13_wk14_cors.1 <- C13_wk14_cors %>%
+  filter(correlation > .34)     #..34 -> 145 nodes
+select(C13_wk14_cors.1, 1) -> C13_wk14_nodes
+unique(C13_wk14_nodes)  -> C13_wk14_nodes
+
+#read_csv("C13wk1_TermClusters.csv") -> C13wk1_TermClusters1
+C13_wk14_net <- graph_from_data_frame(C13_wk14_cors.1, directed = FALSE, C13_wk14_nodes)
+C13_wk14_lay <- create_layout(C13_wk14_net, layout = "fr")
+g2 <- ggraph(C13_wk14_lay) +
+  geom_edge_link(aes(edge_alpha = correlation)) +
+  geom_node_point(aes(color = V(C13_wk14_net)$Wk14_Cluster, size = 5)) + #V(C13_wk14_net)$Wk1_Cluster
+  geom_node_text(aes(label = name), repel = TRUE) +
+  theme_graph()
+
+edge.betweenness.community(C13_wk14_net) -> C13_wk14_com
+C13wk14_Clusters <- tibble(term = C13_wk14_com$names, 
+                               Wk14_Cluster = C13_wk14_com$membership)
+```
+
+```{r}
+select(C13_wk1_7_lemmas.NVA, 1,10) -> C13_wk1_7_lemmas.NVA.1
+colnames(C13_wk1_7_lemmas.NVA.1)[2] <- "word"
+C13_wk1_7_lemmas.NVA.1 <- C13_wk1_7_lemmas.NVA.1 %>% 
+    mutate(word = ifelse(str_detect(word, "^[:upper:]+$"), word,str_to_lower(word)))
+C13_wk1_7_lemmas.NVA.1$word <- str_replace_all(C13_wk1_7_lemmas.NVA.1$word, rep_str)
+C13_wk1_7_lemmas.NVA.1 <- C13_wk1_7_lemmas.NVA.1 %>%  
+  anti_join(stop_words) %>%
+  anti_join(digits)
+
+C13_wk17_cors <- C13_wk1_7_lemmas.NVA.1 %>% 
+  group_by(word) %>%
+  filter(n()>=10) %>%
+  pairwise_cor(word, doc_id, sort = TRUE)
+
+C13_wk17_cors.1 <- C13_wk17_cors %>%
+  filter(correlation > .32)
+select(C13_wk17_cors.1, 1) -> C13_wk17_nodes
+unique(C13_wk17_nodes)  -> C13_wk17_nodes
+
+#read_csv("C13wk1_TermClusters.csv") -> C13wk1_TermClusters1
+C13_wk17_net <- graph_from_data_frame(C13_wk17_cors.1, directed = FALSE, C13_wk17_nodes)
+C13_wk17_lay <- create_layout(C13_wk17_net, layout = "fr")
+g3 <- ggraph(C13_wk17_lay) +
+  geom_edge_link(aes(edge_alpha = correlation)) +
+  geom_node_point(aes(color = "green", size = 5)) + #V(C13_wk14_net)$Wk1_Cluster
+  geom_node_text(aes(label = name), repel = TRUE) +
+  theme_graph()
+
+edge.betweenness.community(C13_wk17_net) -> C13_wk17_com
+C13wk17_Clusters <- tibble(term = C13_wk17_com$names, 
+                               Wk17_Cluster = C13_wk17_com$membership)
+
+```
+
+```{r}
+select(C13_wk1_10_lemmas.NVA, 1,10) -> C13_wk1_10_lemmas.NVA.1
+colnames(C13_wk1_10_lemmas.NVA.1)[2] <- "word"
+C13_wk1_10_lemmas.NVA.1 <- C13_wk1_10_lemmas.NVA.1 %>% 
+    mutate(word = ifelse(str_detect(word, "^[:upper:]+$"), word,str_to_lower(word)))
+C13_wk1_10_lemmas.NVA.1$word <- str_replace_all(C13_wk1_10_lemmas.NVA.1$word, rep_str)
+C13_wk1_10_lemmas.NVA.1 <- C13_wk1_10_lemmas.NVA.1 %>%  
+  anti_join(stop_words) %>%
+  anti_join(digits)
+
+C13_wk110_cors <- C13_wk1_10_lemmas.NVA.1 %>% 
+  group_by(word) %>%
+  filter(n()>=10) %>%
+  pairwise_cor(word, doc_id, sort = TRUE)
+
+C13_wk110_cors.1 <- C13_wk110_cors %>%
+  filter(correlation > .29)
+select(C13_wk110_cors.1, 1) -> C13_wk110_nodes
+unique(C13_wk110_nodes)  -> C13_wk110_nodes
+
+#read_csv("C13wk1_TermClusters.csv") -> C13wk1_TermClusters1
+C13_wk110_net <- graph_from_data_frame(C13_wk110_cors.1, directed = FALSE, C13_wk110_nodes)
+C13_wk110_lay <- create_layout(C13_wk110_net, layout = "fr")
+g4 <- ggraph(C13_wk110_lay) +
+  geom_edge_link(aes(edge_alpha = correlation)) +
+  geom_node_point(aes(color = "green", size = 5)) + #V(C13_wk14_net)$Wk1_Cluster
+  geom_node_text(aes(label = name), repel = TRUE) +
+  theme_graph()
+
+edge.betweenness.community(C13_wk110_net) -> C13_wk110_com
+C13wk110_Clusters <- tibble(term = C13_wk110_com$names, 
+                               Wk110_Cluster = C13_wk110_com$membership)
+
+```
+
+
+```{r my code}
+select(C13_full, 4,5) -> Participants
+tibble(Participant = unique(Participants$AuthorFrom)) -> Participants
+
+filter(C13_full, AuthorFrom == Participants$`Participant`[14]) -> P1
+select(P1, 6,3) -> P1
+colnames(P1)[1] <- "doc_id"
+colnames(P1)[2] <- "text"
+P1$doc_id <- 1:nrow(P1)
+
+udpipe(P1, object = "english") -> P1_lemmas
+filter(P1_lemmas, upos == "NOUN") -> P1_lemmas.N
+filter(P1_lemmas, upos == "VERB") -> P1_lemmas.V
+filter(P1_lemmas, upos == "ADJ") -> P1_lemmas.A
+rbind(P1_lemmas.N,P1_lemmas.V,P1_lemmas.A) -> P1_lemmas.NVA
+select(P1_lemmas.NVA, 1,10) -> P1_lemmas.NVA.1
+colnames(P1_lemmas.NVA.1)[2] <- "word"
+P1_lemmas.NVA.1 <- P1_lemmas.NVA.1 %>% 
+    mutate(word = ifelse(str_detect(word, "^[:upper:]+$"), word,str_to_lower(word)))
+P1_lemmas.NVA.1$word <- str_replace_all(P1_lemmas.NVA.1$word, rep_str)
+P1_lemmas.NVA.1 <- P1_lemmas.NVA.1 %>%  
+  anti_join(stop_words) %>%
+  anti_join(digits)
+
+P1_cors <- P1_lemmas.NVA.1 %>% 
+  group_by(word) %>%
+  filter(n()>=10) %>%
+  pairwise_cor(word, doc_id, sort = TRUE)
+
+P1_cors.1 <- P1_cors %>%
+  filter(correlation > .20)
+select(P1_cors.1, 1) -> P1_nodes
+unique(P1_nodes)  -> P1_nodes
+
+read_xlsx("ind_clusters.xlsx") -> clusters
+P14_net <- graph_from_data_frame(P1_cors.1, directed = FALSE, clusters$P14_terms[1:19]) #C13_wk1_nodes
+P14_lay <- create_layout(P14_net, layout = "fr")
+g18.1 <- ggraph(P14_lay) +
+  geom_edge_link(alpha = .10) +
+  geom_node_point(aes(color = clusters$P14_descriptor[1:19], size = 10)) + 
+  geom_node_text(aes(label = name), repel = TRUE) +
+  theme_graph()
+```
+
+
+```{r ind semantic network metrics}
+Ind_metrics <- tibble(Participant = c(Participants$`Participant`[1],Participants$`Participant`[2],Participants$`Participant`[3],Participants$`Participant`[4],Participants$`Participant`[5],Participants$`Participant`[6],Participants$`Participant`[7],Participants$`Participant`[8],Participants$`Participant`[9],Participants$`Participant`[10],Participants$`Participant`[11],Participants$`Participant`[12],Participants$`Participant`[13],Participants$`Participant`[14]),
+                      Sem_Nodes = c(vcount(P1_net),vcount(P2_net),vcount(P3_net),vcount(P4_net),vcount(P5_net),vcount(P6_net),vcount(P7_net),vcount(P8_net),vcount(P9_net),vcount(P10_net),vcount(P11_net),vcount(P12_net),vcount(P13_net),vcount(P14_net)),
+                      Sem_Density = c(edge_density(P1_net), edge_density(P2_net), edge_density(P3_net), edge_density(P4_net), edge_density(P5_net), edge_density(P6_net), edge_density(P7_net), edge_density(P8_net), edge_density(P9_net), edge_density(P10_net), edge_density(P11_net), edge_density(P12_net), edge_density(P13_net), edge_density(P14_net)),
+                      Sem_Centralization = c(centr_degree(P1_net, c("total"))$centralization, centr_degree(P2_net, c("total"))$centralization, centr_degree(P3_net, c("total"))$centralization, centr_degree(P4_net, c("total"))$centralization, centr_degree(P5_net, c("total"))$centralization, centr_degree(P6_net, c("total"))$centralization, centr_degree(P7_net, c("total"))$centralization, centr_degree(P8_net, c("total"))$centralization, centr_degree(P9_net, c("total"))$centralization, centr_degree(P10_net, c("total"))$centralization, centr_degree(P11_net, c("total"))$centralization, centr_degree(P12_net, c("total"))$centralization, centr_degree(P13_net, c("total"))$centralization, centr_degree(P14_net, c("total"))$centralization)) 
+centrality <- tibble(Participant = V(gr13)$name,
+                     Interaction_Degree      = degree(gr13,mode="out"),
+                     Interaction_Closeness   = closeness(gr13, mode = "all"),
+                     Interaction_Eig         = eigen_centrality(gr13)$vector)
+Ind_metrics <- left_join(Ind_metrics,centrality, by = "Participant")
+```
+
+
+```{r my code}
+P1_cluster <- tibble(            P1_terms = edge.betweenness.community(P1_net)$names, 
+                               cluster = edge.betweenness.community(P1_net)$membership,
+                               P1_descriptor = c(""))
+P1_cluster <-                                      P1_cluster[order(P1_cluster$cluster),] 
+P2_cluster <- tibble(            P2_terms = edge.betweenness.community(P2_net)$names, 
+                               cluster = edge.betweenness.community(P2_net)$membership,
+                               P2_descriptor = c(""))
+P2_cluster <-                                      P2_cluster[order(P2_cluster$cluster),] 
+P3_cluster <- tibble(            P3_terms = edge.betweenness.community(P3_net)$names, 
+                               cluster = edge.betweenness.community(P3_net)$membership,
+                               P3_descriptor = c(""))
+P3_cluster <-                                      P3_cluster[order(P3_cluster$cluster),] 
+P4_cluster <- tibble(            P4_terms = edge.betweenness.community(P4_net)$names, 
+                               cluster = edge.betweenness.community(P4_net)$membership,
+                               P4_descriptor = c(""))
+P4_cluster <-                                      P4_cluster[order(P4_cluster$cluster),] 
+P5_cluster <- tibble(            P5_terms = edge.betweenness.community(P5_net)$names, 
+                               cluster = edge.betweenness.community(P5_net)$membership,
+                               P5_descriptor = c(""))
+P5_cluster <-                                      P5_cluster[order(P5_cluster$cluster),] 
+P6_cluster <- tibble(            P6_terms = edge.betweenness.community(P6_net)$names, 
+                               cluster = edge.betweenness.community(P6_net)$membership,
+                               P6_descriptor = c(""))
+P6_cluster <-                                      P6_cluster[order(P6_cluster$cluster),] 
+P7_cluster <- tibble(            P7_terms = edge.betweenness.community(P7_net)$names, 
+                               cluster = edge.betweenness.community(P7_net)$membership,
+                               P7_descriptor = c(""))
+P7_cluster <-                                      P7_cluster[order(P7_cluster$cluster),] 
+P8_cluster <- tibble(            P8_terms = edge.betweenness.community(P8_net)$names, 
+                               cluster = edge.betweenness.community(P8_net)$membership,
+                               P8_descriptor = c(""))
+P8_cluster <-                                      P8_cluster[order(P8_cluster$cluster),] 
+P9_cluster <- tibble(            P9_terms = edge.betweenness.community(P9_net)$names, 
+                               cluster = edge.betweenness.community(P9_net)$membership,
+                               P9_descriptor = c(""))
+P9_cluster <-                                      P9_cluster[order(P9_cluster$cluster),] 
+P10_cluster <- tibble(          P10_terms = edge.betweenness.community(P10_net)$names, 
+                               cluster = edge.betweenness.community(P10_net)$membership,
+                               P10_descriptor = c(""))
+P10_cluster <-                                     P10_cluster[order(P10_cluster$cluster),] 
+P11_cluster <- tibble(            P11_terms = edge.betweenness.community(P11_net)$names, 
+                               cluster = edge.betweenness.community(P11_net)$membership,
+                               P11_descriptor = c(""))
+P11_cluster <-                                     P11_cluster[order(P11_cluster$cluster),] 
+P12_cluster <- tibble(            P12_terms = edge.betweenness.community(P12_net)$names, 
+                               cluster = edge.betweenness.community(P12_net)$membership,
+                               P12_descriptor = c(""))
+P12_cluster <-                                      P12_cluster[order(P12_cluster$cluster),] 
+P13_cluster <- tibble(            P13_terms = edge.betweenness.community(P13_net)$names, 
+                               cluster = edge.betweenness.community(P13_net)$membership,
+                               P13_descriptor = c(""))
+P13_cluster <-                                      P13_cluster[order(P13_cluster$cluster),] 
+P14_cluster <- tibble(           P14_terms = edge.betweenness.community(P14_net)$names, 
+                               cluster = edge.betweenness.community(P14_net)$membership,
+                               P14_descriptor = c(""))
+P14_cluster <-                                      P14_cluster[order(P14_cluster$cluster),] 
+
+clusters_full <- cbindX(P1_cluster,P2_cluster,P3_cluster,P4_cluster,P5_cluster,P6_cluster,P7_cluster,P8_cluster,P9_cluster,P10_cluster,P11_cluster,P12_cluster,P13_cluster,P14_cluster) #combines data frames with dif number of rows
+#write_xlsx(clusters_full, path = "ind_clusters.xlsx")
+```
+
+
+```{r linear model}
+ggplot(data = Ind_metrics) +
+  geom_point(aes(y=Sem_Nodes, x = Interaction_Degree)) +
+  #geom_label(aes(y=Sem_Nodes, x = Interaction_Degree,label=Participant)) +
+  xlim(0,1) +
+  ylim(0,175)
+  
+lm(Ind_metrics$Sem_Nodes ~ Ind_metrics$Interaction_Degree, data = Ind_metrics) -> lm1
+cor.test(Ind_metrics$Interaction_Eig, Ind_metrics$Sem_Nodes)
+summary(lm1)
+confint(lm1)
+#The linear model suggests that there is a statistically significant relationship between eigenvector centrality and the number o nodes in participant semantic networks. The estimated standard error for eigenvector centrality is 75.96 and this estimate was significant (p<.05). This means that for every unit increase in eigenvector centrality there is an expected increase of 76 nodes in participants semantic network. The multiple R-squared of the model is .4315, indicating that this model explained approximately 43% of the variance. 
+#On the other hand, there was no significant relationship between outdegree centrality and the number of nodes in participants' semantic networks. This might mean that while interaction is important, who you interact with in online discussions is important to develop and engage with discourse.
+```
+
+```{r}
+summaries <- data.frame()
+unique_values <- tibble(Discourse_feature = c("Mathematical_object", "Narrative", "Pedagogy","Quantity","Social","Visual_mediator","Reflection"))
+
+
+for (i in 1:14) {
+  col_name <- paste0("P", i, "_descriptor")
+  col_summary <- summarise(count = summary(clusters[,col_name]))
+  assign(paste0("col_summary",i),col_summary)
+}
+features_of_sem_network <- list()
+for(i in 1:14) {}
+ 
+  
+   if (col_name %in% names(clusters)) {
+    col_summary <- table(clusters[, col_name])
+    if (nrow(col_summary) > 0) {
+      col_summary <- as.data.frame(col_summary)
+      names(col_summary) <- col_name
+      summaries[[col_name]] <- col_summary
+      unique_values <- c(unique_values, unique(clusters[, col_name]))
+    }
+  }
+}
+
+features_of_sem_network <- do.call(merge, summaries)
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
